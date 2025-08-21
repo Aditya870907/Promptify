@@ -1,5 +1,5 @@
 import userModel from "../models/userModel.js";
-import bcrypt from 'bcrypt';
+import bcrypt from 'bcryptjs';
 import jwt from 'jsonwebtoken';
 import razorpay from 'razorpay';
 import transactionModel from "../models/transactionModel.js";
@@ -16,7 +16,7 @@ const registerUser = async (req, res)=>{
     
     const userData = {
       name, email, password: hashedPassword
-    }
+    }  
 
     const newUser = new userModel(userData);
     const user = await newUser.save()
