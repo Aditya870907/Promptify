@@ -6,7 +6,7 @@ import connectDB from './config/mongodb.js'
 import userRouter from './routes/userRoute.js'
 import imageRouter from './routes/imageRoute.js'
 
-const PORT = process.env.port || 4000
+const PORT = process.env.PORT || 4000
 const app = express()
 
 app.use(express.json())
