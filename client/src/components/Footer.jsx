@@ -14,7 +14,7 @@ const Footer = () => {
         width={150}
       />
       <p className="flex-1 border-l border-gray-400 pl-4 text-sm text-gray-500 max-sm:hidden">
-        Copyright @imagify.dev | All right reserved
+        Copyright @promptify.dev | All right reserved
       </p>
 
       <div className="flex gap-2.5">
