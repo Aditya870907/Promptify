@@ -1,5 +1,5 @@
 import express from 'express'
-import {registerUser, loginUser, userCredits, paymentRazorpay, verifyRazorpay} from '../controllers/userController.js'
+import {registerUser, loginUser, userCredits, paymentRazorpay, verifyRazorpay, formDataSubmit} from '../controllers/userController.js'
 import userAuth from '../middleware/auth.js';
 
 const userRouter = express.Router()
@@ -9,6 +9,7 @@ userRouter.post('/login', loginUser);
 userRouter.get('/credits', userAuth, userCredits);
 userRouter.post('/pay-razor', userAuth, paymentRazorpay);
 userRouter.post('/verify-razor', verifyRazorpay);
+userRouter.post('/submit-form', userAuth, formDataSubmit);
 
 export default userRouter
 

@@ -13,7 +13,9 @@ app.use(express.json())
 app.use(cors())
 await connectDB()
 
+console.log('🔍 Registering user routes...');
 app.use('/api/user', userRouter)
+console.log('✅ User routes registered');
 app.use('/api/image', imageRouter)
 app.get('/', (req, res)=> res.send('API Working'))
 

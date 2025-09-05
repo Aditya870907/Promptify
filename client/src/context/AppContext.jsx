@@ -1,3 +1,4 @@
+// Updated AppContextProvider.js (Add full address structure to initial formData)
 import { createContext, useEffect, useState } from "react";
 import { toast } from "react-toastify";
 import axios from "axios";
@@ -9,11 +10,19 @@ const AppContextProvider = (props) => {
   const [user, setUser] = useState(false);
   const [showLogin, setShowLogin] = useState(false);
   const [token, setToken] = useState(localStorage.getItem("token") || "");
-
   const [credit, setCredit] = useState(false);
+  const [formData, setFormData] = useState({
+    paymentMethod: "full",
+    emiDuration: 0,
+    billingDetails: {
+      fullName: "",
+      email: "",
+      phone: "",
+      address: { street: "", city: "", state: "", postalCode: "", country: "" },
+    },
+  });
 
   const backendUrl = import.meta.env.VITE_BACKEND_URL;
-
   const navigate = useNavigate();
 
   const loadCreditsData = async () => {
@@ -34,17 +43,17 @@ const AppContextProvider = (props) => {
 
   const generateImage = async (prompt) => {
     try {
-      console.log("Sending req to backend with prompt", prompt); //
+      console.log("Sending req to backend with prompt", prompt);
       const { data } = await axios.post(
         backendUrl + "/api/image/generate-image",
         { prompt },
         { headers: { token } }
       );
-      console.log("API Response", data); //
+      console.log("API Response", data);
 
       if (data.success) {
         loadCreditsData();
-        console.log("Generated Image URL", data.resultImage); //
+        console.log("Generated Image URL", data.resultImage);
         return data.resultImage;
       } else {
         toast.error(data.message);
@@ -64,11 +73,40 @@ const AppContextProvider = (props) => {
     localStorage.removeItem("token");
     setToken("");
     setUser(null);
+    // Reset formData on logout
+    setFormData({
+      paymentMethod: "full",
+      emiDuration: 0,
+      billingDetails: {
+        fullName: "",
+        email: "",
+        phone: "",
+        address: {
+          street: "",
+          city: "",
+          state: "",
+          postalCode: "",
+          country: "",
+        },
+      },
+    });
+  };
+
+  const updateFormData = (newData) => {
+    setFormData((prev) => ({ ...prev, ...newData }));
+    localStorage.setItem("formData", JSON.stringify(newData));
   };
 
   useEffect(() => {
     if (token) {
       loadCreditsData();
+    }
+    const savedFormData = localStorage.getItem("formData");
+    if (savedFormData) {
+      setFormData((prev) => ({ ...prev, ...JSON.parse(savedFormData) }));
+    } else {
+      // Reset localStorage if invalid
+      localStorage.removeItem("formData");
     }
   }, [token]);
 
@@ -85,7 +123,10 @@ const AppContextProvider = (props) => {
     loadCreditsData,
     logout,
     generateImage,
+    formData,
+    updateFormData,
   };
+
   return (
     <AppContext.Provider value={value}>{props.children}</AppContext.Provider>
   );

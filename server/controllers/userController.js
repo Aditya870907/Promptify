@@ -3,6 +3,9 @@ import bcrypt from 'bcryptjs';
 import jwt from 'jsonwebtoken';
 import razorpay from 'razorpay';
 import transactionModel from "../models/transactionModel.js";
+import { google } from 'googleapis';
+
+const sheets = google.sheets('v4');
 
 const registerUser = async (req, res)=>{
   try{
@@ -68,108 +71,158 @@ const userCredits = async (req, res) =>{
   }
 }
 
+const formDataSubmit = async (req, res) => {
+  console.log('🚀 formDataSubmit called with body:', req.body); // Log
+  try {
+    const { userId, planId, paymentMethod, emiDuration, billingDetails } = req.body;
+      console.log('📋 Extracted data:', { userId, planId, paymentMethod, billingDetails });//Log
 
+    if (!userId || !planId || !billingDetails?.fullName || !billingDetails?.email) {
+      console.log('❌ Validation failed');//Log
+      return res.status(400).json({ success: false, message: 'Missing required fields' });
+    }
+
+    let credits, plan, amount;
+    switch (planId) {
+      case 'Basic':
+        plan = 'Basic'; credits = 100; amount = 10; break;
+      case 'Advanced':
+        plan = 'Advanced'; credits = 750; amount = 50; break;
+      case 'Business':
+        plan = 'Business'; credits = 5000; amount = 250; break;
+      default:
+        console.log('❌ Invalid plan:', planId); //Log
+        return res.status(400).json({ success: false, message: 'Invalid plan' });
+    }
+ console.log('💰 Plan details:', { plan, credits, amount });//
+    const emiAmount = paymentMethod === 'emi' && emiDuration ? (amount / emiDuration).toFixed(2) : 0;
+    const transactionData = {
+      userId,
+      planId,
+      amount,
+      credits,
+      paymentMethod: paymentMethod || 'full',
+      emiDuration: paymentMethod === 'emi' ? emiDuration : 0,
+      emiAmount: paymentMethod === 'emi' ? emiAmount : 0,
+      billingDetails: {
+        fullName: billingDetails.fullName,
+        email: billingDetails.email,
+        phone: billingDetails.phone || '',
+        address: billingDetails.address || {}
+      },
+      razorpayOrderId: '', // Filled after payment creation
+      paymentStatus: 'pending',
+      createdAt: new Date(),
+      sheetRowId: '' // Filled after Google Sheets update
+    };
+    console.log('📄 Transaction data to save:', JSON.stringify(transactionData, null, 2)); // Log
+
+    const newTransaction = await transactionModel.create(transactionData);
+        console.log('✅ Transaction created successfully:', newTransaction); // Log
+
+    res.status(200).json({ success: true, transactionId: newTransaction._id });
+  } catch (error) {
+    console.log('❌ Error in formDataSubmit:', error); // Log
+    console.error(error);
+    res.status(500).json({ success: false, message: error.message });
+  }
+};
 
 const razorpayInstance = new razorpay({
   key_id: process.env.RAZORPAY_KEY_ID,
   key_secret: process.env.RAZORPAY_KEY_SECRET,
 })
 
-const paymentRazorpay = async(req, res) => {
-try{
+const paymentRazorpay = async (req, res) => {
+  try {
+    const { userId, planId, transactionId } = req.body;
+    const userData = await userModel.findById(userId);
 
-  const {userId, planId} = req.body
-  const userData = await userModel.findById(userId);
-
-  if(!userId || !planId){
-    return res.json({success: false, message: "Missing Details"})
-  }
-
-  let credits, plan, amount, date
-
-  switch(planId){
-    case 'Basic':
-      plan = 'Basic'
-      credits = 100
-      amount = 10
-      break;
-
-      case 'Advanced':
-      plan = 'Advanced'
-      credits = 750
-      amount = 500
-      break;
-
-      case 'Business':
-      plan = 'Business'
-      credits = 5000
-      amount = 250
-      break;
-
-      default: 
-        return res.json({success: false, message: 'plan not found'});
-  }
-
-  date = Date.now();
-
-  const transactionData = {
-    userId, plan, amount, credits, date
-  }
-
-  const newTransaction = await transactionModel.create(transactionData)
-
-
-  const options = {
-    amount: amount * 100,
-    currency: process.env.CURRENCY,
-    receipt: newTransaction._id,
-  }
-
-  await razorpayInstance.orders.create(options, (error, order)=>{
-    if(error){
-      console.log(error)
-      return res.json({success: false, message: error})
+    if (!userId || !planId || !transactionId) {
+      return res.json({ success: false, message: 'Missing Details' });
     }
-    res.json({success: true, order})
-  })
 
-}catch(error){
-  console.log(error)
-  res.json({success: false, message: error.message})
-}
-}
+    const transaction = await transactionModel.findById(transactionId);
+    if (!transaction) {
+      return res.json({ success: false, message: 'Transaction not found' });
+    }
+
+    const options = {
+      amount: transaction.amount * 100,
+      currency: process.env.CURRENCY || 'INR',
+      receipt: transactionId,
+    };
+
+    // Use Promise-based Razorpay call
+    const order = await razorpayInstance.orders.create(options);
+    // Update and save transaction
+    transaction.razorpayOrderId = order.id;
+    await transaction.save(); // Works here because it's in an async function
+    res.json({ success: true, order });
+  } catch (error) {
+    console.log(error);
+    res.json({ success: false, message: error.message });
+  }
+};
+
+const auth = new google.auth.JWT({
+  email: process.env.GOOGLE_SERVICE_EMAIL,
+  key: process.env.GOOGLE_SERVICE_KEY.replace(/\\n/g, '\n'),
+  scopes: ['https://www.googleapis.com/auth/spreadsheets'],
+});
 
 const verifyRazorpay = async (req, res) => {
-  try{
+  try {
+    const { razorpay_order_id } = req.body;
+    const orderInfo = await razorpayInstance.orders.fetch(razorpay_order_id);
 
-    const {razorpay_order_id} = req.body;
+    if (orderInfo.status === 'paid') {
+      const transaction = await transactionModel.findOneAndUpdate(
+        { razorpayOrderId: razorpay_order_id, paymentStatus: 'pending' },
+        { paymentStatus: 'completed' },
+        { new: true }
+      );
 
-    const orderInfo = await razorpayInstance.orders.fetch(razorpay_order_id)
-
-    if(orderInfo.status === "paid"){
-      const transactionData = await transactionModel.findById(orderInfo.receipt)
-
-      if(transactionData.payment){
-        return res.json({success: false, message: 'Payment Failed'})
+      if (!transaction) {
+        return res.json({ success: false, message: 'Transaction not found or already processed' });
       }
 
-      const userData = await userModel.findById(transactionData.userId)
+      const userData = await userModel.findById(transaction.userId);
+      const creditBalance = (userData.creditBalance || 0) + transaction.credits;
+      await userModel.findByIdAndUpdate(userData._id, { creditBalance });
 
-      const creditBalance = userData.creditBalance + transactionData.credits
+      // Append to Google Sheet
+      const sheetValues = [
+        transaction.userId.toString(),
+        transaction.planId,
+        transaction.amount,
+        transaction.credits,
+        transaction.billingDetails.fullName,
+        transaction.billingDetails.email,
+        transaction.createdAt.toISOString(),
+        transaction.paymentMethod,
+        transaction.emiDuration || '',
+        transaction.emiAmount || '',
+        transaction.razorpayOrderId,
+        transaction.paymentStatus
+      ];
+      const response = await sheets.spreadsheets.values.append({
+        auth,
+        spreadsheetId: process.env.GOOGLE_SHEET_ID,
+        range: 'Sheet1!A:L', // Adjust based on your Sheet columns
+        valueInputOption: 'RAW',
+        resource: { values: [sheetValues] },
+      });
+      transaction.sheetRowId = response.data.updates.updatedRange.split('!')[1].split(':')[0]; // e.g., 'A10'
+      await transaction.save();
 
-      await userModel.findByIdAndUpdate(userData._id, {creditBalance})
-
-      await transactionModel.findByIdAndUpdate(transactionData._id, {payment: true})
-
-      res.json({success: true, message: "Credits Added"})
-    }else{
-      res.json({success: false, message: "Payment Failed"})
+      res.json({ success: true, message: 'Credits Added' });
+    } else {
+      res.json({ success: false, message: 'Payment Failed' });
     }
-
-  }catch(error){
+  } catch (error) {
     console.log(error);
-    res.json({success: false, message: error.message})
+    res.json({ success: false, message: error.message });
   }
-}
-
-export {registerUser, loginUser, userCredits, paymentRazorpay, verifyRazorpay}
+};
+export {registerUser, loginUser, userCredits, paymentRazorpay, verifyRazorpay, formDataSubmit}
